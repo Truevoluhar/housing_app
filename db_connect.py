@@ -1,5 +1,5 @@
 from flask import session
-import mysql.connector
+import sqlite3
 import error_enum
 import hash_encyrptor
 import user
@@ -7,23 +7,32 @@ import user
 max_login_attempts = 4
 
 def connect():
-
-    returnVar = False
-
     try:
-        db_connect = mysql.connector.connect(
-            host="{YOUR_HOST}",
-            user="{YOUR_DB_USER}",
-            password="{YOUR_DB_PASS}",
-            database="{YOUR_DB}"
-        )
-
-        returnVar = db_connect
-
+        db_connect = sqlite3.connect('housing_app.db')
+        return db_connect
     except:
         print("-- Could not connect to the DB --")
+        return False
 
-    return returnVar
+def init_db():
+    connection = connect()
+    if connection == False:
+        return False
+    cursor = connection.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        failed_attempts INTEGER DEFAULT 0,
+        locked_out INTEGER DEFAULT 0,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        user_type TEXT DEFAULT 'user',
+        session_time TEXT,
+        active INTEGER DEFAULT 1
+    )''')
+    connection.commit()
+    connection.close()
 
 
 def login(username, password):
@@ -33,13 +42,13 @@ def login(username, password):
     if connection == False:
         return False
 
-    query = 'SELECT * FROM users WHERE email="'+username+'"'
+    query = 'SELECT * FROM users WHERE email=?'
 
     db_cursor = connection.cursor()
 
     try:
 
-        db_cursor.execute(query)
+        db_cursor.execute(query, (username,))
         result = db_cursor.fetchone()
 
         if result:
@@ -98,7 +107,7 @@ def update_fail_attempts(user_id,attempts,locked_out = 0):
     if db_connect == False:
         return False
 
-    query = "UPDATE users SET failed_attempts = %s, locked_out = %s WHERE id = %s"
+    query = "UPDATE users SET failed_attempts = ?, locked_out = ? WHERE id = ?"
 
     val = (attempts, locked_out, user_id)
 
@@ -107,3 +116,34 @@ def update_fail_attempts(user_id,attempts,locked_out = 0):
     db_cursor.execute(query, val)
 
     db_connect.commit()
+    db_connect.close()
+
+def check_email_exists(email):
+    connection = connect()
+    if connection == False:
+        return False
+
+    query = 'SELECT COUNT(*) FROM users WHERE email = ?'
+    db_cursor = connection.cursor()
+    db_cursor.execute(query, (email,))
+    result = db_cursor.fetchone()
+    connection.close()
+    return result[0] > 0
+
+def register_user(first_name, last_name, email, hashed_password):
+    connection = connect()
+    if connection == False:
+        return False
+
+    query = "INSERT INTO users (first_name, last_name, email, password, user_type, active) VALUES (?, ?, ?, ?, ?, ?)"
+    val = (first_name, last_name, email, hashed_password, 'user', 1)
+
+    db_cursor = connection.cursor()
+    try:
+        db_cursor.execute(query, val)
+        connection.commit()
+        return True
+    except:
+        return False
+    finally:
+        connection.close()
